@@ -1,64 +1,40 @@
-// db.rs
-use rocksdb::{DB, ColumnFamilyDescriptor, Options, Error};
-use std::path::Path;
+use rocksdb::{Options, DB};
 use std::sync::Arc;
+use tokio::task;
 
-pub struct RocksDB {
+#[derive(Clone)]
+pub struct Database {
     db: Arc<DB>,
-    cf_name: String,
 }
 
-impl RocksDB {
-    pub fn new(db_path: &str, cf_name: &str) -> Result<Self, Error> {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
-        opts.set_max_open_files(512);
+impl Database {
+    // Initialize the database
+    pub fn new(path: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let db = Arc::new(DB::open_default(path)?);
+        Ok(Self { db })
+    }
 
-        let cf_descriptor = ColumnFamilyDescriptor::new(cf_name, Options::default());
-        let db = Arc::new(DB::open_cf_descriptors(
-            &opts,
-            db_path,
-            vec![cf_descriptor],
-        )?);
-
-        Ok(Self {
-            db,
-            cf_name: cf_name.to_string(),
+    // Asynchronous method to insert data
+    pub async fn insert(&self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let db_clone = Arc::clone(&self.db);
+        let key_owned = key.to_vec();
+        let value_owned = value.to_vec();
+        task::spawn_blocking(move || {
+            db_clone.put(&key_owned, &value_owned)?;
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
         })
+        .await?
     }
 
-    pub async fn process_command(&self, command: &str) -> String {
-        let cf = self.db.cf_handle(&self.cf_name).unwrap();
-        
-        match command.split_once(':') {
-            Some(("CREATE", fsid)) => {
-                let db_clone = Arc::clone(&self.db);
-                let fsid_clone = fsid.to_string();
-                match tokio::task::spawn_blocking(move || {
-                    db_clone.put_cf(cf, fsid_clone.as_bytes(), b"created")
-                }).await {
-                    Ok(Ok(_)) => format!("Directory '{}' created\n", fsid),
-                    Ok(Err(e)) => format!("Error creating directory '{}': {}\n", fsid, e),
-                    Err(e) => format!("Task failed: {}\n", e),
-                }
-            }
-            Some(("DELETE", fsid)) => {
-                let db_clone = Arc::clone(&self.db);
-                let fsid_clone = fsid.to_string();
-                match tokio::task::spawn_blocking(move || {
-                    db_clone.delete_cf(cf, fsid_clone.as_bytes())
-                }).await {
-                    Ok(Ok(_)) => format!("Directory '{}' deleted\n", fsid),
-                    Ok(Err(e)) => format!("Error deleting directory '{}': {}\n", fsid, e),
-                    Err(e) => format!("Task failed: {}\n", e),
-                }
-            }
-            _ => "Invalid command format. Use CREATE:FSID or DELETE:FSID\n".to_string(),
-        }
-    }
-
-    pub fn get_db(&self) -> Arc<DB> {
-        Arc::clone(&self.db)
+    // Asynchronous method to retrieve data
+    pub async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>> {
+        let db_clone = Arc::clone(&self.db);
+        let key_owned = key.to_vec();
+        let result = task::spawn_blocking(move || {
+            let value = db_clone.get(&key_owned)?;
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(value)
+        })
+        .await?;
+        result
     }
 }
