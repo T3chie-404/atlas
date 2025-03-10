@@ -2,12 +2,27 @@
 name = "atlas"
 version = "0.1.0"
 edition = "2024"
+build =true
 
 [dependencies]
 chrono = "0.4.40"
 futures-util = "0.3.31"
 log = "0.4.26"
+prost = "0.13.5"
+prost-types = "0.13.5"
+protobuf = "3.7.1"
 quinn = "0.11.6"
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-tungstenite = "0.26.2"
 rocksdb = "0.23.0" 
+tonic = "0.12.3"
+
+protobuf-codegen-pure = "2.28.0"
+
+
+[build-dependencies]
+protobuf-codegen = "3.7.1"
+prost-build = "0.13.5"
+protobuf-codegen-pure = "2.28.0"
+
+
