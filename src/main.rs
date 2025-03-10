@@ -1,14 +1,21 @@
 mod logger;
+use std::path::Path;
+
 use logger::init_logger;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio_tungstenite::accept_async;
-use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::tungstenite::protocol::Message as TMessage;
 use futures_util::{StreamExt, SinkExt};
 use log::{info, error};
-use std::path::Path;
+use protobuf::Message;
+
+
+include!(concat!(env!("OUT_DIR"), "/test-protos/mod.rs"));
+
+use types::{Request,Opcode};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -29,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         info!("New TCP connection: {}", addr);
         tokio::spawn(async move {
-            let mut buf = [0; 1024];
+            let mut buf = vec![0; 1024];
 
             loop {
                 let n = match socket.read(&mut buf).await {
@@ -41,41 +48,90 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 };
 
-                let received_data = String::from_utf8_lossy(&buf[..n]).to_string();
-                info!("Received: {}", received_data);
-
-                let response = match received_data.trim().split_once(':') {
-                    Some(("CREATE", fsid)) => {
-                        let path = Path::new(fsid);
-                        match fs::create_dir(&path).await {
-                            Ok(_) => {
-                                let msg = format!("Directory '{}' created", fsid);
-                                let _ = tx.send(msg.clone());
-                                format!("{}\n", msg)
-                            }
-                            Err(e) => format!("Error creating directory '{}': {}\n", fsid, e),
+                let received_data = &buf[..n];
+                // let in_resp = Request::parse_from_bytes(&received_data).unwrap();
+                match Request::parse_from_bytes(&received_data) {
+                    Ok(request) => {
+                        let response = handle_request(request, &tx).await;
+                        if let Err(e) = socket.write_all(response.as_bytes()).await {
+                            error!("Error writing to socket: {:?}", e);
                         }
                     }
-                    Some(("DELETE", fsid)) => {
-                        let path = Path::new(fsid);
-                        match fs::remove_dir_all(&path).await {
-                            Ok(_) => {
-                                let msg = format!("Directory '{}' deleted", fsid);
-                                let _ = tx.send(msg.clone());
-                                format!("{}\n", msg)
-                            }
-                            Err(e) => format!("Error deleting directory '{}': {}\n", fsid, e),
-                        }
+                    Err(e) => {
+                        error!("Failed to decode Protobuf request: {:?}", e);
+                        let _ = socket.write_all(b"Invalid Protobuf request\n").await;
                     }
-                    _ => "Invalid command format. Use CREATE:FSID or DELETE:FSID\n".to_string(),
-                };
-
-                if let Err(e) = socket.write_all(response.as_bytes()).await {
-                    error!("Error writing to socket: {:?}", e);
-                    return;
                 }
             }
         });
+    }
+}
+
+// Function to handle Protobuf request
+async fn handle_request(request: Request, tx: &broadcast::Sender<String>) -> String {
+    
+    match request.op.enum_value(){
+        Ok(Opcode::BIGBANG) =>  {
+            let pubkey_bytes = request.pubkey;
+
+            // Attempt to convert 'pubkey' to a UTF-8 string
+            match std::str::from_utf8(&pubkey_bytes) {
+                Ok(fsid) => {
+                    let path = Path::new(fsid);
+                    match fs::create_dir(&path).await {
+                        Ok(_) => {
+                            let msg = format!("Directory '{}' created", fsid);
+                            info!("{}", msg);
+                            msg
+                        }
+                        Err(e) => {
+                            let err_msg = format!("Error creating directory '{}': {}", fsid, e);
+                            error!("{}", err_msg);
+                            err_msg
+                        }
+                    }
+                }
+                Err(e) => {
+                    let err_msg = format!("Invalid UTF-8 sequence in 'pubkey': {}", e);
+                    error!("{}", err_msg);
+                    err_msg
+                }
+            }
+                    }
+            ,
+        Ok(Opcode::ARMAGEDDON) => {
+            let pubkey_bytes = request.pubkey;
+
+            // Attempt to convert 'pubkey' to a UTF-8 string
+
+            match std::str::from_utf8(&pubkey_bytes) {
+                Ok(fsid) => {
+                                let path = Path::new(fsid);
+
+                                    match fs::remove_dir_all(&path).await {
+                                        Ok(_) => {
+                                            let msg = format!("Directory '{}' deleted", fsid);
+                                            let _ = tx.send(msg.clone());
+                                            msg
+                                        }
+                                        Err(e) => format!("Error deleting directory '{}': {}", fsid, e),
+                                    }
+                                }
+                                Err(e) => {
+                                    let err_msg = format!("Invalid UTF-8 sequence in 'pubkey': {}", e);
+                                    error!("{}", err_msg);
+                                    err_msg
+                                }
+                               }
+            }
+            ,
+        Ok(Opcode::OPENRW) => "OPENRW".to_string(),
+        Ok(Opcode::PEEK) => "PEEK".to_string(),
+        Ok(Opcode::POKE) => "POKE".to_string(),
+        Ok(Opcode::RM) => "RM".to_string(),
+        Ok(Opcode::MKDIR) => "MKDIR".to_string(),
+        Ok(Opcode::RMDIR) => "RMDIR".to_string(),
+        Err(_) => "error".to_string(),
     }
 }
 
@@ -108,9 +164,40 @@ async fn handle_ws_client(stream: TcpStream, mut rx: broadcast::Receiver<String>
     let (mut write, _) = ws_stream.split();
 
     while let Ok(msg) = rx.recv().await {
-        if let Err(e) = write.send(Message::Text(msg.into())).await {
+        if let Err(e) = write.send(TMessage::Text(msg.into())).await {
             error!("Failed to send WebSocket message: {:?}", e);
             break;
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::broadcast;
+    use types::{Request, Opcode};
+
+    #[tokio::test]
+    async fn test_handle_request_bigbang() {
+        let (tx, _rx) = broadcast::channel(10);
+        let request = Request {
+            op: Opcode::BIGBANG.into(),
+            pubkey: b"GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L".to_vec(),
+            ..Default::default()
+        };
+        let response = handle_request(request, &tx).await;
+        assert_eq!(response, "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' created");
+    }
+    #[tokio::test]
+    async fn test_handle_request_armageddon() {
+        let (tx, _rx) = broadcast::channel(10);
+        let request = Request {
+            op: Opcode::ARMAGEDDON.into(),
+            pubkey: b"GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L".to_vec(),
+            ..Default::default()
+        };
+        let response = handle_request(request, &tx).await;
+        assert_eq!(response, "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' deleted");
+    }
+}
+
+

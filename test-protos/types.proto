@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+enum Opcode {
+    BIGBANG = 0;    
+    ARMAGEDDON = 1; 
+    OPENRW = 2;    
+    PEEK = 3;      
+    POKE = 4;    
+    RM = 5;        
+    MKDIR = 6;     
+    RMDIR = 7; 
+}
+
+message Request{
+    Opcode op =1;
+    bytes pubkey =2;
+    bytes data = 3;
+}
