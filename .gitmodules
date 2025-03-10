@@ -1,3 +1,0 @@
-[submodule "src/test-protos"]
-	path = src/test-protos
-	url = https://github.com/Xandeum/test-protos.git
