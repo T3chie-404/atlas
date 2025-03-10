@@ -1,21 +1,20 @@
 mod logger;
 use std::path::Path;
 
+use futures_util::{SinkExt, StreamExt};
+use log::{error, info};
 use logger::init_logger;
+use protobuf::Message;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::protocol::Message as TMessage;
-use futures_util::{StreamExt, SinkExt};
-use log::{info, error};
-use protobuf::Message;
-
 
 include!(concat!(env!("OUT_DIR"), "/test-protos/mod.rs"));
 
-use types::{Request,Opcode};
+use types::{Opcode, Request};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -69,9 +68,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 // Function to handle Protobuf request
 async fn handle_request(request: Request, tx: &broadcast::Sender<String>) -> String {
-    
-    match request.op.enum_value(){
-        Ok(Opcode::BIGBANG) =>  {
+    match request.op.enum_value() {
+        Ok(Opcode::BIGBANG) => {
             let pubkey_bytes = request.pubkey;
 
             // Attempt to convert 'pubkey' to a UTF-8 string
@@ -83,6 +81,7 @@ async fn handle_request(request: Request, tx: &broadcast::Sender<String>) -> Str
                             let msg = format!("Directory '{}' created", fsid);
                             info!("{}", msg);
                             msg
+
                         }
                         Err(e) => {
                             let err_msg = format!("Error creating directory '{}': {}", fsid, e);
@@ -97,8 +96,7 @@ async fn handle_request(request: Request, tx: &broadcast::Sender<String>) -> Str
                     err_msg
                 }
             }
-                    }
-            ,
+        }
         Ok(Opcode::ARMAGEDDON) => {
             let pubkey_bytes = request.pubkey;
 
@@ -106,25 +104,24 @@ async fn handle_request(request: Request, tx: &broadcast::Sender<String>) -> Str
 
             match std::str::from_utf8(&pubkey_bytes) {
                 Ok(fsid) => {
-                                let path = Path::new(fsid);
+                    let path = Path::new(fsid);
 
-                                    match fs::remove_dir_all(&path).await {
-                                        Ok(_) => {
-                                            let msg = format!("Directory '{}' deleted", fsid);
-                                            let _ = tx.send(msg.clone());
-                                            msg
-                                        }
-                                        Err(e) => format!("Error deleting directory '{}': {}", fsid, e),
-                                    }
-                                }
-                                Err(e) => {
-                                    let err_msg = format!("Invalid UTF-8 sequence in 'pubkey': {}", e);
-                                    error!("{}", err_msg);
-                                    err_msg
-                                }
-                               }
+                    match fs::remove_dir_all(&path).await {
+                        Ok(_) => {
+                            let msg = format!("Directory '{}' deleted", fsid);
+                            let _ = tx.send(msg.clone());
+                            msg
+                        }
+                        Err(e) => format!("Error deleting directory '{}': {}", fsid, e),
+                    }
+                }
+                Err(e) => {
+                    let err_msg = format!("Invalid UTF-8 sequence in 'pubkey': {}", e);
+                    error!("{}", err_msg);
+                    err_msg
+                }
             }
-            ,
+        }
         Ok(Opcode::OPENRW) => "OPENRW".to_string(),
         Ok(Opcode::PEEK) => "PEEK".to_string(),
         Ok(Opcode::POKE) => "POKE".to_string(),
@@ -174,7 +171,7 @@ async fn handle_ws_client(stream: TcpStream, mut rx: broadcast::Receiver<String>
 mod tests {
     use super::*;
     use tokio::sync::broadcast;
-    use types::{Request, Opcode};
+    use types::{Opcode, Request};
 
     #[tokio::test]
     async fn test_handle_request_bigbang() {
@@ -185,7 +182,10 @@ mod tests {
             ..Default::default()
         };
         let response = handle_request(request, &tx).await;
-        assert_eq!(response, "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' created");
+        assert_eq!(
+            response,
+            "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' created"
+        );
     }
     #[tokio::test]
     async fn test_handle_request_armageddon() {
@@ -196,8 +196,9 @@ mod tests {
             ..Default::default()
         };
         let response = handle_request(request, &tx).await;
-        assert_eq!(response, "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' deleted");
+        assert_eq!(
+            response,
+            "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' deleted"
+        );
     }
 }
-
-
