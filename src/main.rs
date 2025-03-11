@@ -135,6 +135,11 @@ async fn handle_request(request: Request, tx: &broadcast::Sender<String>, db: &D
 
                     match fs::remove_dir_all(&path).await {
                         Ok(_) => {
+                            if let Err(e) = db.delete(fsid.as_bytes()).await {
+                                let err_msg = format!("Error deleting key '{}' from RocksDB: {}", fsid, e);
+                                error!("{}", err_msg);
+                                return err_msg;
+                            }
                             let msg = format!("Directory '{}' deleted", fsid);
                             let _ = tx.send(msg.clone());
                             msg
@@ -204,32 +209,40 @@ mod tests {
     #[tokio::test]
     async fn test_handle_request_bigbang() {
         let (tx, _rx) = broadcast::channel(10);
+        let fsid = "GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L23";
         let request = Request {
             op: Opcode::BIGBANG.into(),
-            pubkey: b"GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L".to_vec(),
+            pubkey: fsid.as_bytes().to_vec(),
             ..Default::default()
         };
-        let db = Database::new("./temp/db2").unwrap();
+        
+        let db = Database::new("./temp/db").unwrap();
 
         let response = handle_request(request, &tx, &db).await;
-        assert_eq!(
-            response,
-            "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' created"
-        );
+        assert_eq!(response, format!("Directory '{}' created", fsid));
+
     }
-    // #[tokio::test]
-    // async fn test_handle_request_armageddon() {
-    //     let (tx, _rx) = broadcast::channel(10);
-    //     let request = Request {
-    //         op: Opcode::ARMAGEDDON.into(),
-    //         pubkey: b"GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L".to_vec(),
-    //         ..Default::default()
-    //     };
-    //     let db = Arc::new(MockDatabase::new());
-    //     let response = handle_request(request, &tx, &db).await;
-    //     assert_eq!(
-    //         response,
-    //         "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' deleted"
-    //     );
-    // }
+    #[tokio::test]
+    async fn test_handle_request_armageddon() {
+        let (tx, _rx) = broadcast::channel(10);
+        let fsid = "GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L2";
+        let request = Request {
+            op: Opcode::ARMAGEDDON.into(),
+            pubkey: fsid.as_bytes().to_vec(),
+            ..Default::default()
+        };
+        let db = Database::new("./temp/db").unwrap();
+    
+        // Insert a record to ensure it exists before deletion
+        db.insert(fsid.as_bytes(), b"Directory created").await.unwrap();
+    
+        let response = handle_request(request, &tx, &db).await;
+        assert_eq!(response, format!("Directory '{}' deleted", fsid));
+    
+        // Verify that the record has been deleted
+        let result = db.get(fsid.as_bytes()).await.unwrap();
+        assert!(result.is_none());
+    }
+    
+    
 }

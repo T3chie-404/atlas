@@ -37,4 +37,14 @@ impl Database {
         .await?;
         result
     }
+
+    pub async fn delete(&self, key: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let db_clone = Arc::clone(&self.db);
+        let key_owned = key.to_vec();
+        task::spawn_blocking(move || {
+            db_clone.delete(&key_owned)?;
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        })
+        .await?
+    }
 }
