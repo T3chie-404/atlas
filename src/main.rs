@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logger().expect("Failed to initialize logger");
 
     // Initialize the database
-    let db = Database::new("/temp/db").unwrap();
+    let db = Database::new("./temp/db").unwrap();
 
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
     info!("TCP Server running on 127.0.0.1:8080");
@@ -37,46 +37,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(handle_websocket_clients(ws_listener, tx.clone()));
     let db = db.clone(); // Clone the database handle for each connection
 
-    if let Err(e) = db.insert("1".as_bytes(), b"Directory created").await {
-        error!("Failed to insert record into RocksDB: {:?}", e);
-    }
-    Ok(())
-
-    // loop {
-    //     let (mut socket, addr) = listener.accept().await?;
-    //     let tx = tx.clone();
-    //     let db = db.clone(); // Clone the database handle for each connection
-
-    //     info!("New TCP connection: {}", addr);
-    //     tokio::spawn(async move {
-    //         let mut buf = vec![0; 1024];
-
-    //         loop {
-    //             let n = match socket.read(&mut buf).await {
-    //                 Ok(0) => return,
-    //                 Ok(n) => n,
-    //                 Err(e) => {
-    //                     error!("Error reading from socket: {:?}", e);
-    //                     return;
-    //                 }
-    //             };
-
-    //             let received_data = &buf[..n];
-    //             match Request::parse_from_bytes(&received_data) {
-    //                 Ok(request) => {
-    //                     let response = handle_request(request, &tx, &db).await;
-    //                     if let Err(e) = socket.write_all(response.as_bytes()).await {
-    //                         error!("Error writing to socket: {:?}", e);
-    //                     }
-    //                 }
-    //                 Err(e) => {
-    //                     error!("Failed to decode Protobuf request: {:?}", e);
-    //                     let _ = socket.write_all(b"Invalid Protobuf request\n").await;
-    //                 }
-    //             }
-    //         }
-    //     });
+    // if let Err(e) = db.insert("isha".as_bytes(), b"Directory created").await {
+    //     error!("Failed to insert record into RocksDB: {:?}", e);
+    // }else{
+    //     println!()
     // }
+    // Ok(())
+
+    loop {
+        let (mut socket, addr) = listener.accept().await?;
+        let tx = tx.clone();
+        let db = db.clone(); // Clone the database handle for each connection
+
+        info!("New TCP connection: {}", addr);
+        tokio::spawn(async move {
+            let mut buf = vec![0; 1024];
+
+            loop {
+                let n = match socket.read(&mut buf).await {
+                    Ok(0) => return,
+                    Ok(n) => n,
+                    Err(e) => {
+                        error!("Error reading from socket: {:?}", e);
+                        return;
+                    }
+                };
+
+                let received_data = &buf[..n];
+                match Request::parse_from_bytes(&received_data) {
+                    Ok(request) => {
+                        let response = handle_request(request, &tx, &db).await;
+                        if let Err(e) = socket.write_all(response.as_bytes()).await {
+                            error!("Error writing to socket: {:?}", e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to decode Protobuf request: {:?}", e);
+                        let _ = socket.write_all(b"Invalid Protobuf request\n").await;
+                    }
+                }
+            }
+        });
+    }
 
 }
 
@@ -192,42 +194,42 @@ async fn handle_ws_client(stream: TcpStream, mut rx: broadcast::Receiver<String>
         }
     }
 }
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use tokio::sync::broadcast;
-//     use types::{Opcode, Request};
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::broadcast;
+    use types::{Opcode, Request};
 
 
-//     #[tokio::test]
-//     async fn test_handle_request_bigbang() {
-//         let (tx, _rx) = broadcast::channel(10);
-//         let request = Request {
-//             op: Opcode::BIGBANG.into(),
-//             pubkey: b"GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L".to_vec(),
-//             ..Default::default()
-//         };
-//         let db = Database::new("/temp/db").unwrap();
+    #[tokio::test]
+    async fn test_handle_request_bigbang() {
+        let (tx, _rx) = broadcast::channel(10);
+        let request = Request {
+            op: Opcode::BIGBANG.into(),
+            pubkey: b"GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L".to_vec(),
+            ..Default::default()
+        };
+        let db = Database::new("./temp/db2").unwrap();
 
-//         let response = handle_request(request, &tx, db).await;
-//         assert_eq!(
-//             response,
-//             "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' created"
-//         );
-//     }
-//     #[tokio::test]
-//     async fn test_handle_request_armageddon() {
-//         let (tx, _rx) = broadcast::channel(10);
-//         let request = Request {
-//             op: Opcode::ARMAGEDDON.into(),
-//             pubkey: b"GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L".to_vec(),
-//             ..Default::default()
-//         };
-//         let db = Arc::new(MockDatabase::new());
-//         let response = handle_request(request, &tx, &db).await;
-//         assert_eq!(
-//             response,
-//             "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' deleted"
-//         );
-//     }
-// }
+        let response = handle_request(request, &tx, &db).await;
+        assert_eq!(
+            response,
+            "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' created"
+        );
+    }
+    // #[tokio::test]
+    // async fn test_handle_request_armageddon() {
+    //     let (tx, _rx) = broadcast::channel(10);
+    //     let request = Request {
+    //         op: Opcode::ARMAGEDDON.into(),
+    //         pubkey: b"GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L".to_vec(),
+    //         ..Default::default()
+    //     };
+    //     let db = Arc::new(MockDatabase::new());
+    //     let response = handle_request(request, &tx, &db).await;
+    //     assert_eq!(
+    //         response,
+    //         "Directory 'GzuW7rkNfaLTvDb4vNEh2xr1e3GVgqrWgPMuBuckdu4L' deleted"
+    //     );
+    // }
+}
